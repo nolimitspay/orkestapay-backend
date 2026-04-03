@@ -1,0 +1,44 @@
+{
+  "gateways": [],
+  "payments": [],
+  "subscriptions": [],
+  "customers": [],
+  "shops": [],
+  "webhooks": [],
+  "pixels": [],
+  "emailTemplates": [
+    {
+      "id": "857a7c9a-3bbb-4d2c-8fef-11486f010dec",
+      "name": "Cart Recovery",
+      "subject": "¡Tu carrito te espera!",
+      "html": "<h1>Hola {{name}}, dejaste algo en tu carrito.</h1><p>Completa tu compra aquí: <a href=\"{{checkout_url}}\">Finalizar pedido</a></p>",
+      "active": true,
+      "type": "cart_recovery",
+      "updatedAt": "2026-04-03T20:16:37.715Z"
+    },
+    {
+      "id": "aeefc145-50a0-4141-ba8e-d51f410b74b4",
+      "name": "Order Confirmation",
+      "subject": "Pedido confirmado ✓",
+      "html": "<h1>¡Gracias por tu pedido, {{name}}!</h1><p>Tu pago de {{amount}} ha sido procesado correctamente.</p>",
+      "active": true,
+      "type": "order_confirmation",
+      "updatedAt": "2026-04-03T20:16:37.716Z"
+    },
+    {
+      "id": "6b3f5333-0b1e-40f5-869f-28b120574142",
+      "name": "Tracking Update",
+      "subject": "Tu pedido está en camino #{{order_id}}",
+      "html": "<h1>Tu pedido está en camino</h1><p>Número de seguimiento: <strong>{{tracking_number}}</strong></p><p><a href=\"{{tracking_url}}\">Seguir pedido</a></p>",
+      "active": true,
+      "type": "tracking",
+      "updatedAt": "2026-04-03T20:16:37.716Z"
+    }
+  ],
+  "webhookLogs": [],
+  "settings": {
+    "routing": "percentage",
+    "retryAttempts": 5,
+    "retryBackoff": "exponential"
+  }
+}
