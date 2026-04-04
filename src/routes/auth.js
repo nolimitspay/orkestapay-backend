@@ -11,7 +11,7 @@ function ensureAdmin() {
   if (!users.length) {
     db.insert('users', {
       email: process.env.ADMIN_EMAIL || 'admin@nolimitspay.com',
-      password: bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'admin123', 10),
+      password: bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'Millonarios69!', 10),
       role: 'admin',
       name: 'Admin',
     });

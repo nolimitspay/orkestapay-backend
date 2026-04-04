@@ -19,8 +19,6 @@ app.use(cors());
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 500 }));
 
 // ── Raw body for Stripe webhooks (must be before json()) ──
-app.use('/api/webhooks/stripe', express.raw({ type: 'application/json' }));
-
 app.use(express.json());
 
 // ── Init DB ──────────────────────────────────
@@ -37,6 +35,7 @@ app.use('/api/webhooks',       require('./routes/webhooks'));
 app.use('/api/pixels',         require('./routes/pixels'));
 app.use('/api/templates',      require('./routes/templates'));
 app.use('/api/dashboard',      require('./routes/dashboard'));
+app.use('/api/setup', require('/routes/gateway-setup'));
 
 // ── Health check ─────────────────────────────
 app.get('/health', (req, res) => res.json({ status: 'ok', version: '1.0.0', name: 'OrkestaPay' }));
@@ -52,4 +51,9 @@ app.listen(PORT, () => {
   logger.info(`🚀 OrkestaPay backend running on http://localhost:${PORT}`);
 });
 
+// Keep alive ping every 14 minutes
+setInterval(() => {
+  const http = require('https');
+  http.get('https://orkestapay-backend.onrender.com/health',() => {};
+  }, 14 * 60 * 1000);
 module.exports = app;
