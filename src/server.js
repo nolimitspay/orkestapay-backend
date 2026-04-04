@@ -1,4 +1,5 @@
 require('dotenv').config();
+const { router: authRouter } = require('./routes/auth');
 const fs = require('fs');
 const path = require('path');
 const dataDir = path.join(__dirname, '../data');
@@ -14,7 +15,7 @@ const app = express();
 
 // ── Security middleware ──────────────────────
 app.use(helmet());
-app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:3000', credentials: true }));
+app.use(cors());
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 500 }));
 
 // ── Raw body for Stripe webhooks (must be before json()) ──
@@ -26,6 +27,7 @@ app.use(express.json());
 db.init();
 
 // ── Routes ────────────────────────────────────
+app.use('/api/auth', authRouter);
 app.use('/api/gateways',       require('./routes/gateways'));
 app.use('/api/payments',       require('./routes/payments'));
 app.use('/api/subscriptions',  require('./routes/subscriptions'));

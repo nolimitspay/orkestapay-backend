@@ -40,5 +40,15 @@
     "routing": "percentage",
     "retryAttempts": 5,
     "retryBackoff": "exponential"
-  }
+  },
+  "users": [
+    {
+      "id": "bbca418f-0095-4442-8ee4-0283117341eb",
+      "createdAt": "2026-04-04T00:02:52.009Z",
+      "email": "admin@nolimitspay.com",
+      "password": "$2b$10$Esr4GP7DxyPesNwP1bV3gO48jXRqICqPw1CkrxZnwde2kqqbZ3mjm",
+      "role": "admin",
+      "name": "Admin"
+    }
+  ]
 }
