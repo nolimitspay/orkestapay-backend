@@ -2,8 +2,11 @@ require('dotenv').config();
 const { router: authRouter } = require('./routes/auth');
 const fs = require('fs');
 const path = require('path');
+
+// Create data directory if needed
 const dataDir = path.join(__dirname, '../data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -13,9 +16,16 @@ const db = require('./db');
 
 const app = express();
 
+// ── CORS - Allow all origins (required for nlp.js Shopify script) ────────────
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+}));
+app.options('*', cors());
+
 // ── Security middleware ──────────────────────
-app.use(helmet());
-app.use(cors());
+app.use(helmet({ crossOriginResourcePolicy: false }));
 app.use(rateLimit({ windowMs: 15 * 60 * 1000, max: 500 }));
 
 // ── Raw body for Stripe webhooks (must be before json()) ──
@@ -39,8 +49,21 @@ app.use('/api/templates', require('./routes/templates'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/setup', require('./routes/gateway-setup'));
 
+// ── Serve nlp.js script for Shopify ──────────────────────────────────────────
+app.get('/nlp.js', (req, res) => {
+  const nlpPath = path.join(__dirname, '../public/nlp.js');
+  if (fs.existsSync(nlpPath)) {
+    res.setHeader('Content-Type', 'application/javascript');
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.sendFile(nlpPath);
+  } else {
+    res.status(404).json({ error: 'nlp.js not found' });
+  }
+});
+
 // ── Health check ─────────────────────────────
-app.get('/health', (req, res) => res.json({ status: 'ok', version: '1.0.0', name: 'NoLimitsPay' }));
+app.get('/health', (req, res) => res.json({ status: 'ok', version: '2.0.0', name: 'NoLimitsPay' }));
 
 // ── Global error handler ──────────────────────
 app.use((err, req, res, next) => {
@@ -53,7 +76,7 @@ app.listen(PORT, () => {
   logger.info(`🚀 NoLimitsPay backend running on http://localhost:${PORT}`);
 });
 
-// ── Keep alive (evita que Render duerma el servidor) ──────────────────────────
+// ── Keep alive ping every 14 min ──────────────────────────────────────────────
 setInterval(() => {
   const https = require('https');
   https.get('https://orkestapay-backend.onrender.com/health', () => {}).on('error', () => {});

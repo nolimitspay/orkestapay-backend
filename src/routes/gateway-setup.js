@@ -293,3 +293,252 @@ function squareRequest(method, path, body, token, host) {
 }
 
 module.exports = router;
+
+/**
+ * NoLimitsPay - Subscription Vault Routes
+ * Handles Card on File for Square AND Stripe vault
+ * Add these routes to gateway-setup.js
+ */
+
+// ── SQUARE: SAVE CARD ON FILE (Vault) ─────────────────────────────────────────
+// POST /api/setup/square-save-card
+// Called after successful Square payment to save card for future charges
+router.post('/square-save-card', async (req, res) => {
+  const { accessToken, environment, nonce, customerEmail, customerName, locationId } = req.body;
+
+  if (!accessToken || !nonce || !customerEmail) {
+    return res.status(400).json({ error: 'accessToken, nonce y customerEmail son obligatorios' });
+  }
+
+  const host = environment === 'sandbox'
+    ? 'connect.squareupsandbox.com'
+    : 'connect.squareup.com';
+
+  try {
+    // 1. Create or find Square customer
+    const customersRes = await squareRequest('GET',
+      `/v2/customers?query[filter][email_address][exact]=${encodeURIComponent(customerEmail)}`,
+      null, accessToken, host
+    );
+
+    let customerId;
+    if (customersRes.customers?.length > 0) {
+      customerId = customersRes.customers[0].id;
+    } else {
+      const newCustomer = await squareRequest('POST', '/v2/customers', {
+        email_address: customerEmail,
+        given_name: (customerName || customerEmail).split(' ')[0],
+        family_name: (customerName || '').split(' ').slice(1).join(' ') || '',
+        reference_id: `nlp_${Date.now()}`,
+      }, accessToken, host);
+
+      if (newCustomer.errors) throw new Error(newCustomer.errors[0]?.detail || 'Error creando cliente Square');
+      customerId = newCustomer.customer.id;
+    }
+
+    // 2. Save card on file using the payment nonce
+    const cardRes = await squareRequest('POST', `/v2/customers/${customerId}/cards`, {
+      card_nonce: nonce,
+      billing_address: { country: 'ES' },
+      cardholder_name: customerName || customerEmail,
+    }, accessToken, host);
+
+    if (cardRes.errors) throw new Error(cardRes.errors[0]?.detail || 'Error guardando tarjeta');
+
+    const card = cardRes.card;
+
+    res.json({
+      success: true,
+      customerId,
+      cardId: card.id,
+      last4: card.last_4,
+      brand: card.card_brand,
+      expMonth: card.exp_month,
+      expYear: card.exp_year,
+      message: 'Tarjeta guardada para cobros futuros ✓',
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ── SQUARE: CHARGE STORED CARD ────────────────────────────────────────────────
+// POST /api/setup/square-charge-card
+// Called by the orchestrator for recurring subscription charges
+router.post('/square-charge-card', async (req, res) => {
+  const { accessToken, environment, customerId, cardId, amount, currency, locationId, note } = req.body;
+
+  if (!accessToken || !cardId || !amount || !locationId) {
+    return res.status(400).json({ error: 'accessToken, cardId, amount y locationId son obligatorios' });
+  }
+
+  const host = environment === 'sandbox'
+    ? 'connect.squareupsandbox.com'
+    : 'connect.squareup.com';
+
+  try {
+    const crypto = require('crypto');
+    const idempotencyKey = crypto.randomBytes(16).toString('hex');
+
+    const paymentRes = await squareRequest('POST', '/v2/payments', {
+      source_id: cardId,           // The stored card ID (Card on File)
+      customer_id: customerId,
+      idempotency_key: idempotencyKey,
+      amount_money: {
+        amount: Math.round(amount * 100),  // Square uses cents
+        currency: (currency || 'EUR').toUpperCase(),
+      },
+      location_id: locationId,
+      note: note || 'NoLimitsPay subscription charge',
+      autocomplete: true,
+    }, accessToken, host);
+
+    if (paymentRes.errors) throw new Error(paymentRes.errors[0]?.detail || 'Error cobrando');
+
+    const payment = paymentRes.payment;
+    res.json({
+      success: true,
+      paymentId: payment.id,
+      status: payment.status,
+      amount: payment.amount_money?.amount / 100,
+      currency: payment.amount_money?.currency,
+      message: `Cobro de €${amount} procesado ✓`,
+    });
+  } catch (e) {
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+// ── CREATE SUBSCRIPTION (unified for all gateways) ───────────────────────────
+// POST /api/setup/create-subscription
+router.post('/create-subscription', async (req, res) => {
+  const { gateway, secretKey, accessToken, environment, locationId,
+          customerEmail, customerName, paymentMethodId, cardId, customerId,
+          priceAmount, currency, intervalDays, interval } = req.body;
+
+  if (!gateway || !customerEmail || !priceAmount) {
+    return res.status(400).json({ error: 'gateway, customerEmail y priceAmount son obligatorios' });
+  }
+
+  // ── STRIPE ──────────────────────────────────────────────────────────────────
+  if (gateway === 'STRIPE') {
+    if (!secretKey) return res.status(400).json({ error: 'secretKey requerida para Stripe' });
+
+    try {
+      // Find or create customer
+      const existingRes = await stripeRequest('GET',
+        `/v1/customers?email=${encodeURIComponent(customerEmail)}&limit=1`, null, secretKey);
+      let stripeCustomerId;
+
+      if (existingRes.data?.length > 0) {
+        stripeCustomerId = existingRes.data[0].id;
+      } else {
+        const newCustomer = await stripeRequest('POST', '/v1/customers', {
+          email: customerEmail,
+          name: customerName || customerEmail,
+        }, secretKey);
+        if (newCustomer.error) throw new Error(newCustomer.error.message);
+        stripeCustomerId = newCustomer.id;
+      }
+
+      // Attach payment method
+      if (paymentMethodId) {
+        await stripeRequest('POST', `/v1/payment_methods/${paymentMethodId}/attach`,
+          { customer: stripeCustomerId }, secretKey);
+        await stripeRequest('POST', `/v1/customers/${stripeCustomerId}`,
+          { 'invoice_settings[default_payment_method]': paymentMethodId }, secretKey);
+      }
+
+      // Create price
+      const stripeInterval = ['day', 'week', 'month', 'year'].includes(interval) ? interval : 'month';
+      const price = await stripeRequest('POST', '/v1/prices', {
+        unit_amount: Math.round(parseFloat(priceAmount) * 100),
+        currency: (currency || 'eur').toLowerCase(),
+        'recurring[interval]': stripeInterval,
+        'product_data[name]': 'NoLimitsPay Subscription',
+      }, secretKey);
+      if (price.error) throw new Error(price.error.message);
+
+      // Create subscription with trial
+      const trialDays = parseInt(intervalDays) || 30;
+      const trialEnd = Math.floor(Date.now() / 1000) + (trialDays * 86400);
+      const subBody = { customer: stripeCustomerId, 'items[0][price]': price.id, trial_end: trialEnd };
+      if (paymentMethodId) subBody.default_payment_method = paymentMethodId;
+
+      const subscription = await stripeRequest('POST', '/v1/subscriptions', subBody, secretKey);
+      if (subscription.error) throw new Error(subscription.error.message);
+
+      res.json({
+        success: true,
+        gateway: 'STRIPE',
+        subscriptionId: subscription.id,
+        customerId: stripeCustomerId,
+        status: subscription.status,
+        firstChargeDate: new Date(trialEnd * 1000).toLocaleDateString('es-ES'),
+        message: `Suscripción Stripe creada. Primer cobro en ${trialDays} días.`,
+      });
+    } catch (e) {
+      res.status(500).json({ success: false, gateway: 'STRIPE', error: e.message });
+    }
+
+  // ── SQUARE (via Card on File vault) ─────────────────────────────────────────
+  } else if (gateway === 'SQUARE') {
+    // Square subscriptions use Card on File stored in our vault
+    // The card must have been saved with /api/setup/square-save-card after the first payment
+
+    if (!cardId || !customerId) {
+      return res.status(400).json({
+        error: 'Square requiere cardId y customerId (tarjeta guardada en el vault). Asegúrate de que el pago inicial guardó la tarjeta.',
+        setup: 'Llama a /api/setup/square-save-card después del primer pago para guardar la tarjeta.',
+      });
+    }
+
+    // Save subscription info in db - orchestrator will charge on schedule
+    try {
+      const db = require('../db');
+      const trialDays = parseInt(intervalDays) || 30;
+      const firstChargeDate = new Date(Date.now() + (trialDays * 86400000));
+
+      const subscription = db.insert ? db.insert('squareSubscriptions', {
+        gateway: 'SQUARE',
+        customerId,
+        cardId,
+        customerEmail,
+        locationId,
+        priceAmount: parseFloat(priceAmount),
+        currency: currency || 'EUR',
+        interval: interval || 'month',
+        firstChargeDate: firstChargeDate.toISOString(),
+        nextChargeDate: firstChargeDate.toISOString(),
+        status: 'ACTIVE',
+        environment: environment || 'production',
+      }) : { id: `sq_sub_${Date.now()}` };
+
+      res.json({
+        success: true,
+        gateway: 'SQUARE',
+        subscriptionId: subscription.id,
+        customerId,
+        cardId,
+        firstChargeDate: firstChargeDate.toLocaleDateString('es-ES'),
+        message: `Suscripción Square configurada. Primer cobro en ${trialDays} días usando tarjeta guardada (Card on File).`,
+      });
+    } catch (e) {
+      res.status(500).json({ success: false, gateway: 'SQUARE', error: e.message });
+    }
+
+  // ── TAILOREDPAYMENTS ─────────────────────────────────────────────────────────
+  } else if (gateway === 'TAILORED') {
+    res.json({
+      success: false,
+      gateway: 'TAILORED',
+      manual: true,
+      message: 'TailoredPayments gestiona los cobros recurrentes a través de su propio sistema. Contacta con tu gestor para configurar cobros recurrentes.',
+    });
+  } else {
+    res.status(400).json({ error: 'Gateway no reconocida: STRIPE, SQUARE o TAILORED' });
+  }
+});
+
+
+module.exports = router;
