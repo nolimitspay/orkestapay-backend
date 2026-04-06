@@ -25,7 +25,7 @@ async function charge({ amount, currency, customerId, paymentMethodId, descripti
   const locationId = credentials?.locationId || process.env.SQUARE_LOCATION_ID;
   if (!locationId) throw new Error('Square location ID not configured');
 
-  const amountMoney = { amount: BigInt(Math.round(amount * 100)), currency: currency.toUpperCase() };
+  const amountMoney = { amount: BigInt(Math.round(amount)), currency: currency.toUpperCase() };
 
   const body = {
     sourceId: paymentMethodId || customerId,
@@ -67,7 +67,7 @@ async function createSubscription({ customerId, amount, currency, interval, inte
         phases: [{
           cadence,
           periods: intervalCount || 1,
-          recurringPriceMoney: { amount: BigInt(Math.round(amount * 100)), currency: currency.toUpperCase() },
+          recurringPriceMoney: { amount: BigInt(Math.round(amount)), currency: currency.toUpperCase() },
         }],
       },
     },
