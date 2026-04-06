@@ -48,6 +48,7 @@ app.use('/api/pixels', require('./routes/pixels'));
 app.use('/api/templates', require('./routes/templates'));
 app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/setup', require('./routes/gateway-setup'));
+app.use('/api/checkout', require('./routes/checkout'));
 
 // ── Serve nlp.js script for Shopify ──────────────────────────────────────────
 app.get('/nlp.js', (req, res) => {
